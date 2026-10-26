@@ -1,4 +1,4 @@
-CLAUDE.md
+AGENTS.md
 
 # Python
 __pycache__/
@@ -29,3 +29,5 @@ pnpm-debug.log*
 .next/
 out/
 coverage/
+.agents/
+.codex/
