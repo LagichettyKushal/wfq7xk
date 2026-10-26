@@ -36,11 +36,12 @@ input { background: #fff; border: 1px solid #bcccdc; border-radius: 6px; color: 
 .button { border: 1px solid #9fb3c8; border-radius: 6px; font-weight: 700; min-height: 38px; padding: 7px 12px; }
 .button.secondary { background: #fff; color: #334e68; }
 .button.secondary:hover { background: #f0f4f8; }
-.state { background: #fff; border: 1px dashed #bcccdc; border-radius: 10px; color: #627d98; padding: 26px; text-align: center; }
+.state { align-items: center; background: #fff; border: 1px dashed #bcccdc; border-radius: 10px; color: #627d98; display: flex; justify-content: center; min-height: 280px; padding: 26px; text-align: center; }
 .error-state { border-color: #e66a6a; color: #a33a3a; }
 .headline-grid, .metric-grid { display: grid; gap: 12px; grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .metric-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .metric-card { background: #fff; border: 1px solid #d9e2ec; border-radius: 10px; min-height: 94px; padding: 14px; }
+.metric-grid { min-height: 94px; }
 .metric-card span { color: #627d98; display: block; font-size: 0.76rem; font-weight: 700; line-height: 1.3; }
 .metric-card strong { color: #102a43; display: flex; flex-direction: column; font-size: 1.28rem; line-height: 1.25; margin-top: 9px; }
 .metric-card strong small { color: #829ab1; font-size: 0.72rem; font-weight: 500; margin-top: 4px; }
@@ -65,7 +66,7 @@ input { background: #fff; border: 1px solid #bcccdc; border-radius: 6px; color: 
 .method-copy h3:first-child { margin-top: 0; }
 .method-copy p { margin: 0 0 12px; }
 .method-copy ul { margin-top: 7px; padding-left: 22px; }
-footer { color: #829ab1; font-size: 0.76rem; padding: 22px 2px 0; }
+footer { color: #829ab1; font-size: 0.76rem; min-height: 42px; padding: 22px 2px 0; }
 
 @media (max-width: 1100px) {
   .app-shell { padding: 28px 24px; }

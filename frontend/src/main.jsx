@@ -7,6 +7,7 @@ import {
   CartesianGrid,
   ComposedChart,
   Legend,
+  Label,
   Line,
   ResponsiveContainer,
   Tooltip,
@@ -53,6 +54,37 @@ function formatNumber(value, digits = 1) {
   return new Intl.NumberFormat('en-GB', { maximumFractionDigits: digits }).format(Number(value))
 }
 
+function formatGw(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return EMPTY
+  return `${new Intl.NumberFormat('en-GB', { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(Number(value) / 1000)} GW`
+}
+
+function formatMwAxis(value) {
+  if (!Number.isFinite(Number(value))) return EMPTY
+  return new Intl.NumberFormat('en-GB', { maximumFractionDigits: 0 }).format(Number(value))
+}
+
+function decisionTicks(rows) {
+  const values = rows.flatMap((row) => [row.forecast, row.actual, row.rangeLow, row.rangeHigh])
+    .map(Number).filter(Number.isFinite)
+  const maximum = values.length ? Math.max(...values) : 0
+  const top = Math.max(5000, Math.ceil(maximum / 5000) * 5000)
+  return Array.from({ length: top / 5000 + 1 }, (_, index) => index * 5000)
+}
+
+function formatDayLabel(value) {
+  if (!value) return EMPTY
+  const parsed = new Date(`${String(value).slice(0, 10)}T12:00:00Z`)
+  if (Number.isNaN(parsed.getTime())) return String(value)
+  return new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short' }).format(parsed)
+}
+
+function formatOutputBand(value) {
+  const numbers = String(value).match(/-?[\d,.]+/g)?.map((item) => Number(item.replaceAll(',', '')))
+  if (!numbers || numbers.length < 2) return String(value ?? EMPTY)
+  return `${formatNumber(numbers[0] / 1000, 1)}-${formatNumber(numbers[1] / 1000, 1)} GW`
+}
+
 function formatLocalTime(value, options = {}) {
   if (!value) return EMPTY
   return new Intl.DateTimeFormat('en-GB', {
@@ -62,6 +94,13 @@ function formatLocalTime(value, options = {}) {
     hour: '2-digit',
     minute: '2-digit',
     ...options,
+  }).format(new Date(value))
+}
+
+function formatLocalHour(value) {
+  if (!value) return EMPTY
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hour12: false,
   }).format(new Date(value))
 }
 
@@ -115,12 +154,12 @@ function CutoffControls({ cutoff, setCutoff, onReset }) {
   )
 }
 
-function ChartTooltip({ active, payload, label }) {
+function ChartTooltip({ active, payload, label, valueFormatter = formatMw, labelFormatter }) {
   if (!active || !payload?.length) return null
   return (
     <div className="chart-tooltip">
-      <strong>{label}</strong>
-      {payload.map((entry) => <div key={entry.dataKey}>{entry.name}: {formatMw(entry.value)}</div>)}
+      <strong>{labelFormatter ? labelFormatter(label) : label}</strong>
+      {payload.map((entry) => <div key={entry.dataKey}>{entry.name}: {valueFormatter(entry.value)}</div>)}
     </div>
   )
 }
@@ -161,12 +200,13 @@ function DecisionContent({ data, accuracy, vintages }) {
   const p05 = accuracy.data?.accuracy_summary?.p05_error
   const p95 = accuracy.data?.accuracy_summary?.p95_error
   const chartRows = rows.map((row) => ({
-    label: formatLocalTime(row.startTime, { hour: '2-digit', minute: '2-digit' }),
+    label: formatLocalHour(row.startTime),
     forecast: row.forecast,
     actual: row.actual,
     rangeLow: Number.isFinite(Number(row.forecast)) && Number.isFinite(Number(p95)) ? Number(row.forecast) - Number(p95) : null,
     rangeHigh: Number.isFinite(Number(row.forecast)) && Number.isFinite(Number(p05)) ? Number(row.forecast) - Number(p05) : null,
   }))
+  const ticks = decisionTicks(chartRows)
   return (
     <>
       <div className="headline-grid">
@@ -179,7 +219,7 @@ function DecisionContent({ data, accuracy, vintages }) {
       <Panel title="Forecast versus actual" subtitle={`Delivery day ${formatDateWords(data.day)} · hourly values shown in Europe/London. Hover for the UTC-backed values.`}>
         <div className="chart-legend-note"><span className="band-key" /> Range containing about 90% of actual values in the January backtest (in-sample, not a guarantee).</div>
         <div className="chart-wrap"><ResponsiveContainer width="100%" height={360}><ComposedChart data={chartRows} margin={{ top: 4, right: 20, left: 4, bottom: 10 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#d9e2ec" /><XAxis dataKey="label" angle={0} textAnchor="middle" height={30} interval={2} padding={{ left: 12, right: 12 }} /><YAxis tickFormatter={(value) => formatNumber(value / 1000, 0) + 'k'} /><Tooltip content={<ChartTooltip />} /><Legend verticalAlign="top" height={32} />
+          <CartesianGrid strokeDasharray="3 3" stroke="#d9e2ec" /><XAxis dataKey="label" angle={0} textAnchor="middle" height={30} interval={2} padding={{ left: 12, right: 12 }} /><YAxis ticks={ticks} domain={[0, ticks[ticks.length - 1]]} tickFormatter={formatMwAxis}><Label value="MW" angle={-90} position="insideLeft" /></YAxis><Tooltip content={<ChartTooltip />} /><Legend verticalAlign="top" height={32} />
           <Area type="monotone" dataKey="rangeHigh" stroke="none" fill="#d9eaf7" fillOpacity={0.72} legendType="none" name="Actual range" isAnimationActive={false} />
           <Area type="monotone" dataKey="rangeLow" stroke="none" fill="#ffffff" fillOpacity={1} legendType="none" name="Range base" isAnimationActive={false} />
           <Line type="monotone" dataKey="forecast" stroke="#1769aa" strokeWidth={2.5} dot={false} name="Forecast" connectNulls={false} />
@@ -228,17 +268,26 @@ function AccuracyContent({ data }) {
       <p className="plain-language"><strong>{sentence}</strong> Positive bias means forecast above actual; for a buyer, that may mean under-procuring.</p>
       <div className="chart-grid">
         <ChartPanel title="Error by horizon band" data={data.by_horizon} x="horizon_band" bars={[['mae', 'MAE', '#1769aa'], ['bias', 'Bias', '#e76f51']]} />
-        <ChartPanel title="Error by London hour" data={data.by_hour} x="hour" bars={[['mae', 'MAE', '#1769aa'], ['bias', 'Bias', '#e76f51']]} xFormatter={(value) => `${String(value).padStart(2, '0')}:00`} />
-        <ChartPanel title="Daily bias" data={data.by_day} x="delivery_date" bars={[['bias', 'Bias', '#e76f51']]} />
-        <ChartPanel title="Error by actual-output band" data={data.by_output_band} x="output_band" bars={[['mae', 'MAE', '#1769aa'], ['bias', 'Bias', '#e76f51']]} />
+        <ChartPanel title="Error by London hour" data={data.by_hour} x="hour" bars={[['mae', 'MAE', '#1769aa'], ['bias', 'Bias', '#e76f51']]} xFormatter={(value) => `${String(value).padStart(2, '0')}:00`} xInterval={1} tooltipLabel={(value) => `${String(value).padStart(2, '0')}:00`} />
+        <ChartPanel title="Daily bias" data={data.by_day} x="delivery_date" bars={[['bias', 'Bias', '#e76f51']]} xFormatter={formatDayLabel} xInterval={2} />
+        <ChartPanel title="Error by actual-output band" data={data.by_output_band} x="output_band" bars={[['mae', 'MAE', '#1769aa'], ['bias', 'Bias', '#e76f51']]} outputBand xFormatter={formatOutputBand} />
       </div>
     </>
   )
 }
 
-function ChartPanel({ title, data, x, bars, xFormatter }) {
-  const chartData = (data || []).map((row) => ({ ...row, [x]: String(row[x] ?? EMPTY) }))
-  return <Panel title={title}><div className="chart-wrap small"><ResponsiveContainer width="100%" height={280}><BarChart data={chartData} margin={{ top: 15, right: 12, left: 0, bottom: 42 }}><CartesianGrid strokeDasharray="3 3" stroke="#d9e2ec" /><XAxis dataKey={x} tickFormatter={xFormatter} angle={-30} textAnchor="end" height={65} interval={0} /><YAxis tickFormatter={(value) => formatNumber(value / 1000, 0) + 'k'} /><Tooltip content={<ChartTooltip />} /><Legend />{bars.map(([key, name, color]) => <Bar key={key} dataKey={key} name={name} fill={color} radius={[3, 3, 0, 0]} />)}</BarChart></ResponsiveContainer></div></Panel>
+function ChartPanel({ title, data, x, bars, xFormatter, xInterval = 0, tooltipLabel, outputBand = false }) {
+  const chartData = (data || []).map((row, index) => ({ ...row, [x]: String(row[x] ?? EMPTY), fifth: index + 1 }))
+  const formatter = (value) => formatNumber(Number(value) / 1000, 1)
+  const titleFormatter = (value) => {
+    if (tooltipLabel) return tooltipLabel(value)
+    if (outputBand) {
+      const row = chartData.find((item) => item[x] === value)
+      return `${formatOutputBand(value)} · fifth ${row?.fifth ?? EMPTY} of actual output`
+    }
+    return value
+  }
+  return <Panel title={title}><div className="chart-wrap small"><ResponsiveContainer width="100%" height={280}><BarChart data={chartData} margin={{ top: 38, right: 12, left: 8, bottom: 18 }}><CartesianGrid strokeDasharray="3 3" stroke="#d9e2ec" /><XAxis dataKey={x} tickFormatter={xFormatter} angle={0} textAnchor="middle" height={30} interval={xInterval} /><YAxis tickFormatter={formatter} allowDecimals><Label value="GW" angle={-90} position="insideLeft" /></YAxis><Tooltip content={<ChartTooltip valueFormatter={formatGw} labelFormatter={titleFormatter} />} /><Legend verticalAlign="top" height={32} />{bars.map(([key, name, color]) => <Bar key={key} dataKey={key} name={name} fill={color} radius={[3, 3, 0, 0]} />)}</BarChart></ResponsiveContainer></div></Panel>
 }
 
 function MethodView({ meta }) {
