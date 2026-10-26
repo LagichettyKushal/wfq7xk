@@ -66,6 +66,8 @@ def test_accuracy_matches_direct_pure_function_result(client: TestClient) -> Non
     assert body["accuracy_summary"]["n"] == expected["n"]
     assert body["accuracy_summary"]["mae"] == pytest.approx(expected["mae"])
     assert body["accuracy_summary"]["bias"] == pytest.approx(expected["bias"])
+    assert body["accuracy_summary"]["p05_error"] == pytest.approx(expected["p05_error"])
+    assert body["accuracy_summary"]["p95_error"] == pytest.approx(expected["p95_error"])
 
 
 def test_out_of_range_day_returns_clear_422(client: TestClient) -> None:

@@ -118,6 +118,8 @@ def test_accuracy_summary_uses_signed_bias_and_absolute_error_percentiles() -> N
     assert result["rmse"] == pytest.approx(10**0.5)
     assert result["bias"] == -1.0
     assert result["mae_pct_of_mean_actual"] == 37.5
+    assert result["p05_error"] == pytest.approx(-3.7)
+    assert result["p95_error"] == pytest.approx(1.7)
     assert result["p50_absolute_error"] == 3.0
     assert result["p90_absolute_error"] == pytest.approx(3.8)
     assert result["p95_absolute_error"] == pytest.approx(3.9)

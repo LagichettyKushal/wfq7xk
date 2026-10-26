@@ -121,6 +121,8 @@ def accuracy_summary(
                 "rmse": np.sqrt((errors**2).mean()),
                 "bias": errors.mean(),
                 "mae_pct_of_mean_actual": 100 * absolute_errors.mean() / mean_actual,
+                "p05_error": errors.quantile(0.05),
+                "p95_error": errors.quantile(0.95),
                 "p50_absolute_error": absolute_errors.quantile(0.50),
                 "p90_absolute_error": absolute_errors.quantile(0.90),
                 "p95_absolute_error": absolute_errors.quantile(0.95),
