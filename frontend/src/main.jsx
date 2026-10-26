@@ -291,12 +291,13 @@ function ChartPanel({ title, data, x, bars, xFormatter, xInterval = 0, tooltipLa
 }
 
 function MethodView({ meta }) {
-  return <Panel title="Method and assumptions" subtitle="What this pilot does—and what it deliberately does not claim.">
+  return <Panel title="Method and assumptions" subtitle="Definitions and limits of the snapshot analysis.">
     <div className="method-copy">
-      <h3>Live snapshot</h3><p>This pilot serves a precomputed January 2026 snapshot from Elexon FUELHH WIND actuals and WINDFOR forecasts. The browser never calls Elexon directly.</p>
-      <h3>Assumptions from the backend</h3><ul>{(meta?.assumptions || []).map((assumption) => <li key={assumption}>{assumption}</li>)}</ul>
-      <h3>Coverage caveat</h3><p>Elexon documents coverage differences between the datasets. Those differences have not been quantified here, so forecast bias should not be presented as a proven cause or as a guarantee of future performance.</p>
-      <h3>Pilot scope</h3><p>This is a pilot on January 2026 data only. It is not a live trading or procurement recommendation.</p>
+      <h3>Data snapshot</h3><p>Static snapshot of Elexon FUELHH (fuelType WIND, actuals) and WINDFOR (forecasts), for delivery days 2 Jan to 1 Feb 2026, at national level and for wind only. The browser and the server never call Elexon at runtime; the snapshot is refreshed by <code>backend/scripts/ingest.py</code>.</p>
+      <h3>Assumptions</h3><ul>{(meta?.assumptions || []).map((assumption) => <li key={assumption}>{assumption}</li>)}</ul>
+      <h3>Reading the results</h3><ul><li>Bias is forecast minus actual; positive means the forecast was above actual wind generation.</li><li>The shaded range on the Decision view comes from the same January errors it is shown against (in-sample). It is not a guarantee for future days.</li></ul>
+      <h3>Coverage caveat</h3><p>WINDFOR is documented as covering wind farms visible to the system operator with operational metering, and Elexon notes elsewhere that outturn figures exclude some embedded and unmetered wind. We have not compared the coverage of the two datasets, so the reason for the observed forecast bias has not been established.</p>
+      <h3>Pilot scope</h3><p>January 2026 only; not a live trading or procurement recommendation.</p>
     </div>
   </Panel>
 }

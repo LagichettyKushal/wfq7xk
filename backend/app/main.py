@@ -130,9 +130,10 @@ def meta(request: Request) -> dict[str, object]:
             "forecasts": len(request.app.state.forecasts),
         },
         "assumptions": [
-            "For delivery day D, the purchase decision cutoff is on D-1 at the configured Europe/London time.",
-            "Forecast startTime is aligned to the hourly actual starting at the same time.",
-            "Actual MW is the mean of the two half-hourly values starting at the hour and 30 minutes later.",
+            "The purchase decision for delivery day D is made on D-1 at the cutoff (default 09:00 Europe/London). This is an assumption, not the market gate time. Forecasts are published every 2 to 4 hours, so results change in steps as the cutoff moves.",
+            "For each hour, the forecast used is the latest publication at or before the cutoff.",
+            "Elexon does not define what WINDFOR startTime refers to. We align the forecast at T with the hourly actual starting at T. Shifting the alignment by up to 2 hours changed MAE by under 5%.",
+            "Actuals are half-hourly; each hourly actual is the mean of the two half-hours starting at T and T+30 minutes.",
         ],
     }
 
