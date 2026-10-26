@@ -10,6 +10,7 @@ from typing import AsyncIterator
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.analysis import (
@@ -35,6 +36,7 @@ HORIZON_BANDS = [
     ("36-48h", 36, 48),
     ("48h+", 48, None),
 ]
+FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend-dist"
 
 
 @asynccontextmanager
@@ -223,3 +225,14 @@ def accuracy_view(
             error_by_horizon(all_forecasts, hourly_actuals, HORIZON_BANDS)
         ),
     }
+
+
+if FRONTEND_DIR.is_dir():
+    @app.get("/{path:path}", include_in_schema=False)
+    def frontend(path: str) -> FileResponse:
+        """Serve the built single-page frontend, falling back to index.html."""
+        root = FRONTEND_DIR.resolve()
+        candidate = (root / path).resolve()
+        if candidate.is_relative_to(root) and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(root / "index.html")
