@@ -5,9 +5,9 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  ComposedChart,
   Legend,
   Line,
-  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -68,6 +68,13 @@ function formatLocalTime(value, options = {}) {
 function formatUtc(value) {
   if (!value) return EMPTY
   return `${new Date(value).toISOString().replace('.000Z', 'Z')} UTC`
+}
+
+function formatDateWords(value) {
+  if (!value) return EMPTY
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+  }).format(new Date(`${value}T12:00:00Z`)).replace(',', '')
 }
 
 function ErrorState({ error }) {
@@ -137,6 +144,7 @@ function DecisionView({ meta, day, setDay, cutoff, setCutoff, resetCutoff }) {
           <label>Delivery day
             <input type="date" min={meta?.delivery_days_available.from} max={meta?.delivery_days_available.to} value={day || ''} onChange={(event) => setDay(event.target.value)} />
           </label>
+          <span className="date-words">{formatDateWords(day)}</span>
           <CutoffControls cutoff={cutoff} setCutoff={setCutoff} onReset={resetCutoff} />
         </div>
       </Panel>
@@ -150,13 +158,14 @@ function DecisionContent({ data, accuracy, vintages }) {
   const firstForecast = rows.find((row) => row.forecast !== null && row.forecast !== undefined)
   const avgForecast = rows.reduce((sum, row) => sum + (Number(row.forecast) || 0), 0) / Math.max(1, rows.filter((row) => row.forecast !== null).length)
   const avgActual = rows.reduce((sum, row) => sum + (Number(row.actual) || 0), 0) / Math.max(1, rows.filter((row) => row.actual !== null).length)
-  const p90 = accuracy.data?.accuracy_summary?.p90_absolute_error
+  const p05 = accuracy.data?.accuracy_summary?.p05_error
+  const p95 = accuracy.data?.accuracy_summary?.p95_error
   const chartRows = rows.map((row) => ({
-    label: formatLocalTime(row.startTime, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
+    label: formatLocalTime(row.startTime, { hour: '2-digit', minute: '2-digit' }),
     forecast: row.forecast,
     actual: row.actual,
-    p90Base: Number.isFinite(Number(row.forecast)) && Number.isFinite(Number(p90)) ? Number(row.forecast) - Number(p90) : null,
-    p90Band: Number.isFinite(Number(p90)) ? Number(p90) * 2 : null,
+    rangeLow: Number.isFinite(Number(row.forecast)) && Number.isFinite(Number(p95)) ? Number(row.forecast) - Number(p95) : null,
+    rangeHigh: Number.isFinite(Number(row.forecast)) && Number.isFinite(Number(p05)) ? Number(row.forecast) - Number(p05) : null,
   }))
   return (
     <>
@@ -167,15 +176,15 @@ function DecisionContent({ data, accuracy, vintages }) {
         <MetricCard label="Day MAE" value={formatMw(data.accuracy_summary?.mae)} />
         <MetricCard label="Day bias (forecast − actual)" value={formatMw(data.accuracy_summary?.bias)} tone={Number(data.accuracy_summary?.bias) > 0 ? 'warning' : ''} />
       </div>
-      <Panel title="Forecast versus actual" subtitle="Hourly values shown in Europe/London. Hover for the UTC-backed values.">
-        <div className="chart-legend-note"><span className="band-key" /> P90 absolute error over the whole January backtest (in-sample, not a guarantee).</div>
-        <div className="chart-wrap"><ResponsiveContainer width="100%" height={360}><LineChart data={chartRows} margin={{ top: 18, right: 20, left: 4, bottom: 40 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#d9e2ec" /><XAxis dataKey="label" angle={-35} textAnchor="end" height={65} interval="preserveStartEnd" /><YAxis tickFormatter={(value) => formatNumber(value / 1000, 0) + 'k'} /><Tooltip content={<ChartTooltip />} /><Legend />
-          <Area type="monotone" dataKey="p90Base" stackId="p90" stroke="none" fill="transparent" legendType="none" />
-          <Area type="monotone" dataKey="p90Band" stackId="p90" stroke="none" fill="#d9eaf7" fillOpacity={0.8} name="P90 band" />
+      <Panel title="Forecast versus actual" subtitle={`Delivery day ${formatDateWords(data.day)} · hourly values shown in Europe/London. Hover for the UTC-backed values.`}>
+        <div className="chart-legend-note"><span className="band-key" /> Range containing about 90% of actual values in the January backtest (in-sample, not a guarantee).</div>
+        <div className="chart-wrap"><ResponsiveContainer width="100%" height={360}><ComposedChart data={chartRows} margin={{ top: 4, right: 20, left: 4, bottom: 10 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#d9e2ec" /><XAxis dataKey="label" angle={0} textAnchor="middle" height={30} interval={2} padding={{ left: 12, right: 12 }} /><YAxis tickFormatter={(value) => formatNumber(value / 1000, 0) + 'k'} /><Tooltip content={<ChartTooltip />} /><Legend verticalAlign="top" height={32} />
+          <Area type="monotone" dataKey="rangeHigh" stroke="none" fill="#d9eaf7" fillOpacity={0.72} legendType="none" name="Actual range" isAnimationActive={false} />
+          <Area type="monotone" dataKey="rangeLow" stroke="none" fill="#ffffff" fillOpacity={1} legendType="none" name="Range base" isAnimationActive={false} />
           <Line type="monotone" dataKey="forecast" stroke="#1769aa" strokeWidth={2.5} dot={false} name="Forecast" connectNulls={false} />
           <Line type="monotone" dataKey="actual" stroke="#e76f51" strokeWidth={2} dot={false} name="Actual" />
-        </LineChart></ResponsiveContainer></div>
+        </ComposedChart></ResponsiveContainer></div>
       </Panel>
       <Panel title="Forecast vintages" subtitle="Most recent publications available before the selected cutoff.">
         <AsyncState query={vintages}>{(vintageData) => <div className="vintage-list">{vintageData.vintages.map((vintage) => <div className={`vintage-row ${vintage.selected ? 'selected' : ''}`} key={vintage.publishTime}><div><strong>{formatLocalTime(vintage.publishTime)}</strong><small>{formatUtc(vintage.publishTime)}</small></div><span>{vintage.hours?.length || 0} hourly values</span>{vintage.selected && <em>Selected</em>}</div>)}</div>}</AsyncState>
