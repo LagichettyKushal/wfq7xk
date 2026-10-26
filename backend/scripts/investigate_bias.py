@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 import sys
 
@@ -90,11 +91,22 @@ def print_selected_summary(joined: pd.DataFrame) -> None:
     print(f"RMSE: {np.sqrt((centered_errors**2).mean()):.2f} MW")
 
 
-def print_horizon_summary(forecasts: pd.DataFrame, hourly_actuals: pd.DataFrame) -> None:
-    """Print positive-horizon errors across every available publication."""
+def print_horizon_summary(
+    forecasts: pd.DataFrame,
+    hourly_actuals: pd.DataFrame,
+    from_day: date,
+    to_day: date,
+) -> None:
+    """Print positive-horizon errors across publications in the delivery range."""
     work = forecasts.copy()
     work["startTime"] = pd.to_datetime(work["startTime"], utc=True)
     work["publishTime"] = pd.to_datetime(work["publishTime"], utc=True)
+    local_start_dates = work["startTime"].dt.tz_convert(LONDON_TZ).dt.date
+    work = work.loc[(local_start_dates >= from_day) & (local_start_dates <= to_day)]
+    actual_local_dates = hourly_actuals["startTime"].dt.tz_convert(LONDON_TZ).dt.date
+    hourly_actuals = hourly_actuals.loc[
+        (actual_local_dates >= from_day) & (actual_local_dates <= to_day)
+    ]
     work["horizon_hours"] = (
         (work["startTime"] - work["publishTime"]).dt.total_seconds() / 3600
     )
@@ -103,7 +115,10 @@ def print_horizon_summary(forecasts: pd.DataFrame, hourly_actuals: pd.DataFrame)
     )
     joined = joined.loc[joined["horizon_hours"] > 0].copy()
 
-    print("\nBy horizon (all publications, positive horizons only)")
+    print(
+        f"\nBy horizon (all publications, positive horizons only, "
+        f"delivery days {from_day} to {to_day})"
+    )
     for label, lower, upper in HORIZON_BANDS:
         mask = joined["horizon_hours"] >= lower
         if upper is not None:
@@ -127,7 +142,7 @@ def main() -> None:
     )
 
     print_selected_summary(joined)
-    print_horizon_summary(forecasts, hourly_actuals)
+    print_horizon_summary(forecasts, hourly_actuals, delivery_days[0], delivery_days[-1])
 
 
 if __name__ == "__main__":
