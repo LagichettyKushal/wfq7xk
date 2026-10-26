@@ -1,0 +1,17 @@
+[project]
+name = "wind-forecast-backend"
+version = "0.1.0"
+description = "Backend for the wind forecast portal"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "httpx",
+    "pandas",
+    "pyarrow",
+    "uvicorn",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
