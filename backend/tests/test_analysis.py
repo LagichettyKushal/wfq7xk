@@ -153,6 +153,7 @@ def test_error_by_output_band_calculates_hand_checked_group_values() -> None:
     result = error_by_output_band(joined, bins=2)
 
     assert result["mean_actual"].tolist() == [1.5, 3.5]
+    assert result["output_band"].map(type).eq(str).all()
     assert result["mae"].tolist() == [1.0, 1.0]
     assert result["bias"].tolist() == [0.0, 1.0]
     assert result["n"].tolist() == [2, 2]

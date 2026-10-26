@@ -161,7 +161,7 @@ def error_by_output_band(joined: pd.DataFrame, bins: int = 5) -> pd.DataFrame:
     pairs = _valid_pairs(joined)
     pairs["output_band"] = pd.qcut(pairs["actual"], q=bins, duplicates="drop")
     pairs["error"] = pairs["forecast"] - pairs["actual"]
-    return (
+    result = (
         pairs.groupby("output_band", observed=True, sort=True)
         .agg(
             mean_actual=("actual", "mean"),
@@ -171,6 +171,8 @@ def error_by_output_band(joined: pd.DataFrame, bins: int = 5) -> pd.DataFrame:
         )
         .reset_index()
     )
+    result["output_band"] = result["output_band"].astype(str)
+    return result
 
 
 def error_by_horizon(
