@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from datetime import date
+from functools import lru_cache
 import json
 from pathlib import Path
-from typing import AsyncIterator
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -39,17 +38,15 @@ HORIZON_BANDS = [
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend-dist"
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Load the immutable parquet snapshot once for this process."""
-    app.state.actuals = pd.read_parquet(DATA_DIR / "actuals.parquet")
-    app.state.forecasts = pd.read_parquet(DATA_DIR / "forecasts.parquet")
-    app.state.hourly_actuals = actuals_to_hourly(app.state.actuals)
-    app.state.selection_cache: dict[tuple[int, int], pd.DataFrame] = {}
-    yield
+@lru_cache(maxsize=1)
+def load_snapshot() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Load the immutable parquet snapshot once on first endpoint use."""
+    actuals = pd.read_parquet(DATA_DIR / "actuals.parquet")
+    forecasts = pd.read_parquet(DATA_DIR / "forecasts.parquet")
+    return actuals, forecasts, actuals_to_hourly(actuals)
 
 
-app = FastAPI(title="Wind Forecast Portal API", lifespan=lifespan)
+app = FastAPI(title="Wind Forecast Portal API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
@@ -96,19 +93,21 @@ def requested_days(from_day: date, to_day: date) -> list[date]:
     return list(pd.date_range(from_day, to_day, freq="D").date)
 
 
-def all_selected(request: Request, cutoff_hour: int, cutoff_minute: int) -> pd.DataFrame:
+@lru_cache(maxsize=None)
+def selected_for_cutoff(cutoff_hour: int, cutoff_minute: int) -> pd.DataFrame:
     """Cache all delivery-day selections for each valid cutoff time."""
-    key = (cutoff_hour, cutoff_minute)
-    cache = request.app.state.selection_cache
-    if key not in cache:
-        cache[key] = select_day_ahead_forecast(
-            request.app.state.forecasts,
-            requested_days(AVAILABLE_FROM, AVAILABLE_TO),
-            cutoff_hour=cutoff_hour,
-            cutoff_minute=cutoff_minute,
-            tz=LONDON_TZ,
-        )
-    return cache[key]
+    _, forecasts, _ = load_snapshot()
+    return select_day_ahead_forecast(
+        forecasts,
+        requested_days(AVAILABLE_FROM, AVAILABLE_TO),
+        cutoff_hour=cutoff_hour,
+        cutoff_minute=cutoff_minute,
+        tz=LONDON_TZ,
+    )
+
+
+def all_selected(cutoff_hour: int, cutoff_minute: int) -> pd.DataFrame:
+    return selected_for_cutoff(cutoff_hour, cutoff_minute)
 
 
 def local_days(frame: pd.DataFrame, from_day: date, to_day: date) -> pd.DataFrame:
@@ -120,6 +119,7 @@ def local_days(frame: pd.DataFrame, from_day: date, to_day: date) -> pd.DataFram
 
 @app.get("/api/meta")
 def meta(request: Request) -> dict[str, object]:
+    actuals, forecasts, _ = load_snapshot()
     return {
         "delivery_days_available": {
             "from": AVAILABLE_FROM.isoformat(),
@@ -128,8 +128,8 @@ def meta(request: Request) -> dict[str, object]:
         "default_cutoff": {"hour": 9, "minute": 0, "timezone": LONDON_TZ},
         "data_sources": {"actuals": "FUELHH (fuelType=WIND)", "forecasts": "WINDFOR"},
         "row_counts": {
-            "actuals": len(request.app.state.actuals),
-            "forecasts": len(request.app.state.forecasts),
+            "actuals": len(actuals),
+            "forecasts": len(forecasts),
         },
         "assumptions": [
             "The purchase decision for delivery day D is made on D-1 at the cutoff (default 09:00 Europe/London). This is an assumption, not the market gate time. Forecasts are published every 2 to 4 hours, so results change in steps as the cutoff moves.",
@@ -148,8 +148,9 @@ def day_view(
     cutoff_minute: int = Query(0, ge=0, le=59),
 ) -> dict[str, object]:
     validate_day(day)
-    selected = local_days(all_selected(request, cutoff_hour, cutoff_minute), day, day)
-    rows = selected.merge(request.app.state.hourly_actuals, on="startTime", how="left")[
+    _, _, hourly_actuals = load_snapshot()
+    selected = local_days(all_selected(cutoff_hour, cutoff_minute), day, day)
+    rows = selected.merge(hourly_actuals, on="startTime", how="left")[
         ["startTime", "actual", "forecast", "publishTime", "cutoff", "horizon_hours"]
     ]
     accuracy = accuracy_summary(
@@ -171,10 +172,11 @@ def day_vintages(
     cutoff_minute: int = Query(0, ge=0, le=59),
 ) -> dict[str, object]:
     validate_day(day)
-    selected = local_days(all_selected(request, cutoff_hour, cutoff_minute), day, day)
+    _, forecasts, _ = load_snapshot()
+    selected = local_days(all_selected(cutoff_hour, cutoff_minute), day, day)
     cutoff = selected["cutoff"].iloc[0]
     selected_publish_times = set(selected["publishTime"].dropna())
-    forecasts = local_days(request.app.state.forecasts, day, day)
+    forecasts = local_days(forecasts, day, day)
     eligible = forecasts.loc[forecasts["publishTime"] <= cutoff]
     vintages = []
     for publish_time, rows in eligible.groupby("publishTime", sort=False):
@@ -203,13 +205,14 @@ def accuracy_view(
     cutoff_minute: int = Query(0, ge=0, le=59),
 ) -> dict[str, object]:
     validate_range(from_day, to_day)
+    _, forecasts, hourly_actuals = load_snapshot()
     selected = local_days(
-        all_selected(request, cutoff_hour, cutoff_minute), from_day, to_day
+        all_selected(cutoff_hour, cutoff_minute), from_day, to_day
     )
-    hourly_actuals = local_days(request.app.state.hourly_actuals, from_day, to_day)
+    hourly_actuals = local_days(hourly_actuals, from_day, to_day)
     joined = selected.merge(hourly_actuals, on="startTime", how="inner")
     no_forecast_hours = int(selected["forecast"].isna().sum())
-    all_forecasts = local_days(request.app.state.forecasts, from_day, to_day)
+    all_forecasts = local_days(forecasts, from_day, to_day)
     return {
         "from": from_day.isoformat(),
         "to": to_day.isoformat(),

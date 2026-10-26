@@ -8,6 +8,7 @@
   ],
   "functions": {
     "api/index.py": {
+      "includeFiles": "backend/data/**",
       "excludeFiles": "{backend/tests/**,backend/scripts/**,**/__pycache__/**,**/*.pyc,frontend/node_modules/**,Dockerfile,docker-compose.yml}"
     }
   }

@@ -4,14 +4,14 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from app.analysis import accuracy_summary, actuals_to_hourly, select_day_ahead_forecast
+from app.analysis import accuracy_summary, select_day_ahead_forecast
+from app import main
 from app.main import AVAILABLE_FROM, AVAILABLE_TO, app
 
 
 @pytest.fixture
 def client() -> TestClient:
-    with TestClient(app) as test_client:
-        yield test_client
+    yield TestClient(app)
 
 
 def test_meta_returns_snapshot_metadata(client: TestClient) -> None:
@@ -48,13 +48,14 @@ def test_day_and_vintages_return_expected_keys(client: TestClient) -> None:
 
 def test_accuracy_matches_direct_pure_function_result(client: TestClient) -> None:
     response = client.get("/api/accuracy?from=2026-01-02&to=2026-02-01")
+    actuals, forecasts, hourly_actuals = main.load_snapshot()
 
     expected_selected = select_day_ahead_forecast(
-        client.app.state.forecasts,
+        forecasts,
         pd.date_range(AVAILABLE_FROM, AVAILABLE_TO, freq="D").date,
     )
     expected_joined = expected_selected.merge(
-        actuals_to_hourly(client.app.state.actuals), on="startTime", how="inner"
+        hourly_actuals, on="startTime", how="inner"
     )
     expected = accuracy_summary(expected_joined).iloc[0]
     body = response.json()
@@ -77,12 +78,14 @@ def test_out_of_range_day_returns_clear_422(client: TestClient) -> None:
     assert "between 2026-01-02 and 2026-02-01" in response.json()["detail"]
 
 
-def test_missing_forecast_is_serialised_as_null(client: TestClient) -> None:
+def test_missing_forecast_is_serialised_as_null(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     missing_start = pd.Timestamp("2026-01-02T00:00:00Z")
-    client.app.state.forecasts = client.app.state.forecasts.loc[
-        client.app.state.forecasts["startTime"] != missing_start
+    actuals, forecasts, hourly_actuals = main.load_snapshot()
+    modified_forecasts = forecasts.loc[
+        forecasts["startTime"] != missing_start
     ].copy()
-    client.app.state.selection_cache.clear()
+    monkeypatch.setattr(main, "load_snapshot", lambda: (actuals, modified_forecasts, hourly_actuals))
+    main.selected_for_cutoff.cache_clear()
 
     response = client.get("/api/day?day=2026-01-02")
 
