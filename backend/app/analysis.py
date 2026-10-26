@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Iterable
+from typing import Iterable, Sequence
 
+import numpy as np
 import pandas as pd
 
 
@@ -95,3 +96,115 @@ def join_forecast_actual(
     return selected.merge(hourly_actuals, on="startTime", how="inner")[
         ["startTime", "forecast", "actual", "publishTime", "horizon_hours"]
     ]
+
+
+def _valid_pairs(joined: pd.DataFrame) -> pd.DataFrame:
+    """Return forecast/actual pairs that can contribute to an error metric."""
+    return joined.dropna(subset=["forecast", "actual"]).copy()
+
+
+def accuracy_summary(
+    joined: pd.DataFrame, no_forecast_hours: int = 0
+) -> pd.DataFrame:
+    """Summarise errors for matched forecast and actual values."""
+    pairs = _valid_pairs(joined)
+    errors = pairs["forecast"] - pairs["actual"]
+    absolute_errors = errors.abs()
+    mean_actual = pairs["actual"].mean()
+    return pd.DataFrame(
+        [
+            {
+                "n": len(pairs),
+                "mean_actual": mean_actual,
+                "mean_forecast": pairs["forecast"].mean(),
+                "mae": absolute_errors.mean(),
+                "rmse": np.sqrt((errors**2).mean()),
+                "bias": errors.mean(),
+                "mae_pct_of_mean_actual": 100 * absolute_errors.mean() / mean_actual,
+                "p50_absolute_error": absolute_errors.quantile(0.50),
+                "p90_absolute_error": absolute_errors.quantile(0.90),
+                "p95_absolute_error": absolute_errors.quantile(0.95),
+                "no_forecast_hours": no_forecast_hours,
+            }
+        ]
+    )
+
+
+def error_by_hour(joined: pd.DataFrame, tz: str) -> pd.DataFrame:
+    """Group MAE and signed bias by local hour of a forecast delivery day."""
+    pairs = _valid_pairs(joined)
+    pairs["hour"] = pd.to_datetime(pairs["startTime"], utc=True).dt.tz_convert(tz).dt.hour
+    pairs["error"] = pairs["forecast"] - pairs["actual"]
+    return (
+        pairs.groupby("hour", sort=True)
+        .agg(mae=("error", lambda values: values.abs().mean()), bias=("error", "mean"), n=("error", "size"))
+        .reset_index()
+    )
+
+
+def error_by_day(joined: pd.DataFrame, tz: str) -> pd.DataFrame:
+    """Group MAE and signed bias by local delivery date."""
+    pairs = _valid_pairs(joined)
+    pairs["delivery_date"] = (
+        pd.to_datetime(pairs["startTime"], utc=True).dt.tz_convert(tz).dt.date
+    )
+    pairs["error"] = pairs["forecast"] - pairs["actual"]
+    return (
+        pairs.groupby("delivery_date", sort=True)
+        .agg(mae=("error", lambda values: values.abs().mean()), bias=("error", "mean"), n=("error", "size"))
+        .reset_index()
+    )
+
+
+def error_by_output_band(joined: pd.DataFrame, bins: int = 5) -> pd.DataFrame:
+    """Group errors by equal-count bands of observed actual generation."""
+    pairs = _valid_pairs(joined)
+    pairs["output_band"] = pd.qcut(pairs["actual"], q=bins, duplicates="drop")
+    pairs["error"] = pairs["forecast"] - pairs["actual"]
+    return (
+        pairs.groupby("output_band", observed=True, sort=True)
+        .agg(
+            mean_actual=("actual", "mean"),
+            mae=("error", lambda values: values.abs().mean()),
+            bias=("error", "mean"),
+            n=("error", "size"),
+        )
+        .reset_index()
+    )
+
+
+def error_by_horizon(
+    all_forecasts: pd.DataFrame,
+    hourly_actuals: pd.DataFrame,
+    bands: Sequence[tuple[str, float, float | None]],
+) -> pd.DataFrame:
+    """Group all positive-horizon publication errors into supplied horizon bands."""
+    forecasts = all_forecasts.copy()
+    forecasts["startTime"] = pd.to_datetime(forecasts["startTime"], utc=True)
+    forecasts["publishTime"] = pd.to_datetime(forecasts["publishTime"], utc=True)
+    forecasts["horizon_hours"] = (
+        (forecasts["startTime"] - forecasts["publishTime"]).dt.total_seconds() / 3600
+    )
+    actuals = hourly_actuals.copy()
+    actuals["startTime"] = pd.to_datetime(actuals["startTime"], utc=True)
+    pairs = forecasts.merge(actuals, on="startTime", how="inner").dropna(
+        subset=["generation", "actual"]
+    )
+    pairs = pairs.loc[pairs["horizon_hours"] > 0].copy()
+    pairs["error"] = pairs["generation"] - pairs["actual"]
+
+    rows: list[dict[str, object]] = []
+    for label, lower, upper in bands:
+        mask = pairs["horizon_hours"] >= lower
+        if upper is not None:
+            mask &= pairs["horizon_hours"] < upper
+        band_pairs = pairs.loc[mask]
+        rows.append(
+            {
+                "horizon_band": label,
+                "mae": band_pairs["error"].abs().mean(),
+                "bias": band_pairs["error"].mean(),
+                "n": len(band_pairs),
+            }
+        )
+    return pd.DataFrame(rows, columns=["horizon_band", "mae", "bias", "n"])
